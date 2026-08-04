@@ -1,0 +1,68 @@
+name: Auto-onboard repos for Vercel Actions deploys
+
+# Ensures new (and missing) org repos get:
+# - caller workflow deploy-production.yml
+# - VERCEL_DEPLOY_TARGETS
+# - Vercel project (create if missing)
+# - git auto-deploy disabled (token path only)
+#
+# Requires org-level secrets.VERCEL_TOKEN (visibility: all|private)
+# and repository secret GH_ONBOARDING_TOKEN (classic PAT: repo + admin:org + workflow)
+
+on:
+  schedule:
+    # Every 30 minutes
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "If true, report only"
+        required: false
+        default: "false"
+      max:
+        description: "Max repos to change per run"
+        required: false
+        default: "20"
+
+permissions:
+  contents: read
+
+jobs:
+  onboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout platform-workflows
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Onboard organization repositories
+        env:
+          GH_TOKEN: ${{ secrets.GH_ONBOARDING_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_ONBOARDING_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID || secrets.VERCEL_ORG_ID }}
+          ONBOARD_MAX: ${{ github.event.inputs.max || '20' }}
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          test -n "${VERCEL_TOKEN:-}"
+          test -n "${VERCEL_ORG_ID:-}"
+          ARGS=()
+          if [ "${{ github.event.inputs.dry_run || 'false' }}" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          ARGS+=(--max "${ONBOARD_MAX}")
+          node scripts/onboard-new-repos.mjs "${ARGS[@]}"
+
+      - name: Upload result artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onboard-result
+          path: migration-output/onboard-result.json
+          if-no-files-found: ignore
