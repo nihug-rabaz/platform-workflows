@@ -49,10 +49,7 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ inputs.vercel-org-id }}
       VERCEL_PROJECT_ID: ${{ inputs.vercel-project-id }}
-      # Allow package install scripts (sharp, esbuild, prisma, etc.)
       NPM_CONFIG_IGNORE_SCRIPTS: "false"
-      # pnpm: allow dependency build scripts (pnpm 9+/10 ignore them by default)
-      npm_config_enable_pre_post_scripts: "true"
     steps:
       - name: Validate deployment configuration
         shell: bash
@@ -78,23 +75,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # pnpm 8 does not fail on ignored native builds the way pnpm 9/10 do offline
+          # pnpm 8: runs dependency install scripts (sharp/prisma) without IGNORED_BUILDS failures
           npm install --global pnpm@8.15.9
-          if command -v corepack >/dev/null 2>&1; then
-            corepack enable || true
-          fi
-          # Allow npm lifecycle scripts on npm 10/11 runners
           npm config set ignore-scripts false
-          # pnpm: approve all dependency builds for CI production builds
-          pnpm config set enable-pre-post-scripts true
-          # Create a project-level .npmrc helpers that pnpm also honors
-          {
-            echo "ignore-scripts=false"
-            echo "enable-pre-post-scripts=true"
-          } >> "$HOME/.npmrc"
+          echo "ignore-scripts=false" >> "$HOME/.npmrc"
           pnpm --version
           node --version
-          npm --version
 
       - name: Install Vercel CLI
         shell: bash
@@ -104,40 +90,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Always from repository root so Vercel rootDirectory is applied once
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
-      - name: Load production env into process (if present)
+      - name: Prepare install policy for local vercel build
         shell: bash
         run: |
           set -euo pipefail
-          ENV_FILE=".vercel/.env.production.local"
-          if [ -f "$ENV_FILE" ]; then
-            echo "Loaded production env file exists ($(wc -l < "$ENV_FILE") lines)"
-          else
-            echo "No .vercel/.env.production.local after pull"
+          # Ensure Vercel's internal install does not block scripts for npm/pnpm
+          touch .npmrc
+          grep -q '^ignore-scripts=' .npmrc || echo 'ignore-scripts=false' >> .npmrc
+          # If project uses pnpm only, still fine; .npmrc is ignored harmlessly
+          if [ -f pnpm-lock.yaml ]; then
+            # pnpm 8 does not use dangerouslyAllowAllBuilds; onlyBuiltDependencies optional
+            true
           fi
 
       - name: Build production application
         shell: bash
         run: |
           set -euo pipefail
-          # Ensure pnpm does not block dependency builds
-          export CI=1
-          if [ -f pnpm-lock.yaml ]; then
-            # Write allow-builds for common packages if policy file missing
-            if [ ! -f pnpm-workspace.yaml ] && [ ! -f package.json ]; then
-              true
-            fi
-          fi
-          # For pnpm lockfiles, create/update .npmrc to allow builds during vercel build's internal install
-          if [ -f pnpm-lock.yaml ] || [ -f package.json ]; then
-            touch .npmrc
-            grep -q 'ignore-scripts' .npmrc || echo 'ignore-scripts=false' >> .npmrc
-            grep -q 'enable-pre-post-scripts' .npmrc || echo 'enable-pre-post-scripts=true' >> .npmrc
-            # pnpm 9+ style allow all builds when present
-            grep -q 'dangerouslyAllowAllBuilds' .npmrc || echo 'dangerouslyAllowAllBuilds=true' >> .npmrc
-          fi
           vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy production application
