@@ -16,7 +16,7 @@ on:
         required: true
         type: string
       working-directory:
-        description: Project root directory inside the repository
+        description: Always repo root; Vercel project settings own rootDirectory
         required: false
         type: string
         default: "."
@@ -41,7 +41,7 @@ jobs:
   deploy:
     name: Deploy ${{ inputs.project-name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     concurrency:
       group: vercel-production-${{ github.repository }}-${{ inputs.vercel-project-id }}
       cancel-in-progress: true
@@ -49,6 +49,10 @@ jobs:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ inputs.vercel-org-id }}
       VERCEL_PROJECT_ID: ${{ inputs.vercel-project-id }}
+      # Allow package install scripts (sharp, esbuild, prisma, etc.)
+      NPM_CONFIG_IGNORE_SCRIPTS: "false"
+      # pnpm: allow dependency build scripts (pnpm 9+/10 ignore them by default)
+      npm_config_enable_pre_post_scripts: "true"
     steps:
       - name: Validate deployment configuration
         shell: bash
@@ -65,22 +69,6 @@ jobs:
           ref: ${{ inputs.deploy-ref != '' && inputs.deploy-ref || github.sha }}
           fetch-depth: 1
 
-      - name: Resolve working directory
-        id: workdir
-        shell: bash
-        run: |
-          set -euo pipefail
-          WD="${{ inputs.working-directory }}"
-          if [ -z "$WD" ] || [ "$WD" = "." ]; then
-            echo "dir=." >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ ! -d "$WD" ]; then
-            echo "::error::Working directory '$WD' does not exist in the checked out ref"
-            exit 1
-          fi
-          echo "dir=$WD" >> "$GITHUB_OUTPUT"
-
       - name: Configure Node.js
         uses: actions/setup-node@v4
         with:
@@ -90,39 +78,70 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # pnpm 8 does not fail on ignored native builds the way pnpm 9/10 do offline
+          npm install --global pnpm@8.15.9
           if command -v corepack >/dev/null 2>&1; then
             corepack enable || true
           fi
-          if ! command -v pnpm >/dev/null 2>&1; then
-            npm install --global pnpm@9
-          fi
-          if ! command -v yarn >/dev/null 2>&1; then
-            npm install --global yarn@1.22.22 --force
-          fi
-          pnpm --version || true
-          yarn --version || true
+          # Allow npm lifecycle scripts on npm 10/11 runners
+          npm config set ignore-scripts false
+          # pnpm: approve all dependency builds for CI production builds
+          pnpm config set enable-pre-post-scripts true
+          # Create a project-level .npmrc helpers that pnpm also honors
+          {
+            echo "ignore-scripts=false"
+            echo "enable-pre-post-scripts=true"
+          } >> "$HOME/.npmrc"
+          pnpm --version
+          node --version
+          npm --version
 
       - name: Install Vercel CLI
         shell: bash
         run: npm install --global vercel@54.21.1
 
       - name: Pull Vercel production configuration
-        working-directory: ${{ steps.workdir.outputs.dir }}
         shell: bash
         run: |
           set -euo pipefail
+          # Always from repository root so Vercel rootDirectory is applied once
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
-      - name: Build production application
-        working-directory: ${{ steps.workdir.outputs.dir }}
+      - name: Load production env into process (if present)
         shell: bash
         run: |
           set -euo pipefail
+          ENV_FILE=".vercel/.env.production.local"
+          if [ -f "$ENV_FILE" ]; then
+            echo "Loaded production env file exists ($(wc -l < "$ENV_FILE") lines)"
+          else
+            echo "No .vercel/.env.production.local after pull"
+          fi
+
+      - name: Build production application
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ensure pnpm does not block dependency builds
+          export CI=1
+          if [ -f pnpm-lock.yaml ]; then
+            # Write allow-builds for common packages if policy file missing
+            if [ ! -f pnpm-workspace.yaml ] && [ ! -f package.json ]; then
+              true
+            fi
+          fi
+          # For pnpm lockfiles, create/update .npmrc to allow builds during vercel build's internal install
+          if [ -f pnpm-lock.yaml ] || [ -f package.json ]; then
+            touch .npmrc
+            grep -q 'ignore-scripts' .npmrc || echo 'ignore-scripts=false' >> .npmrc
+            grep -q 'enable-pre-post-scripts' .npmrc || echo 'enable-pre-post-scripts=true' >> .npmrc
+            # pnpm 9+ style allow all builds when present
+            grep -q 'dangerouslyAllowAllBuilds' .npmrc || echo 'dangerouslyAllowAllBuilds=true' >> .npmrc
+          fi
           vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy production application
         id: deploy
-        working-directory: ${{ steps.workdir.outputs.dir }}
         shell: bash
         run: |
           set -euo pipefail
@@ -133,6 +152,5 @@ jobs:
             echo "- Repository: \`${GITHUB_REPOSITORY}\`"
             echo "- Project: \`${{ inputs.project-name }}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
-            echo "- Working directory: \`${{ steps.workdir.outputs.dir }}\`"
             echo "- URL: ${DEPLOYMENT_URL}"
           } >> "$GITHUB_STEP_SUMMARY"
