@@ -16,6 +16,7 @@
     "rollback": "node scripts/rollback-migration.mjs",
     "report": "node scripts/generate-report.mjs",
     "disable-git-deploy": "node scripts/disable-git-deploy.mjs",
-    "onboard": "node scripts/onboard-new-repos.mjs"
+    "onboard": "node scripts/onboard-new-repos.mjs",
+    "ensure-deploy-token": "node scripts/ensure-deploy-token.mjs"
   }
 }

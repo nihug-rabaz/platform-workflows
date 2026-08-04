@@ -111,6 +111,51 @@ export function loadVercelAuthFromCli() {
   }
 }
 
+/** True if org Actions secret exists (value is never readable). */
+export function orgSecretExists(name) {
+  try {
+    gh(["api", `orgs/${ORG}/actions/secrets/${name}`, "--jq", ".name"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True if repo Actions secret exists (value is never readable). */
+export function repoSecretExists(repo, name) {
+  try {
+    gh(["api", `repos/${repo}/actions/secrets/${name}`, "--jq", ".name"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Prove VERCEL_TOKEN works against the Vercel API (without printing the token).
+ * Returns { username } on success; throws on failure.
+ */
+export async function assertVercelTokenValid(token = process.env.VERCEL_TOKEN) {
+  if (!token || !String(token).trim()) {
+    throw new Error("VERCEL_TOKEN is empty");
+  }
+  const res = await fetch("https://api.vercel.com/v2/user", {
+    headers: { Authorization: `Bearer ${String(token).trim()}` },
+  });
+  const text = await res.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!res.ok) {
+    const msg = data?.error?.message || data?.message || res.statusText;
+    throw new Error(`VERCEL_TOKEN rejected by Vercel (${res.status}): ${msg}`);
+  }
+  return { username: data?.user?.username || data?.username || "unknown" };
+}
+
 export function normalizeNodeVersion(v) {
   if (!v) return "22";
   const m = String(v).match(/(\d+)/);

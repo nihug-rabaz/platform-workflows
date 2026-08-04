@@ -49,9 +49,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${VERCEL_ORG_ID}"
-          test -n "${VERCEL_PROJECT_ID}"
-          test -n "${VERCEL_TOKEN}"
+          if [ -z "${VERCEL_ORG_ID:-}" ]; then
+            echo "::error::VERCEL_ORG_ID is empty (matrix org_id / inputs.vercel-org-id)."
+            exit 1
+          fi
+          if [ -z "${VERCEL_PROJECT_ID:-}" ]; then
+            echo "::error::VERCEL_PROJECT_ID is empty (matrix project_id)."
+            exit 1
+          fi
+          if [ -z "${VERCEL_TOKEN:-}" ]; then
+            echo "::error::VERCEL_TOKEN is empty. Set org or repo Actions secret VERCEL_TOKEN to a long-lived Vercel token (https://vercel.com/account/tokens). Repo secrets override org secrets."
+            exit 1
+          fi
+
+      # Fail fast with a clear message if the secret was overwritten with a dead token.
+      - name: Verify VERCEL_TOKEN against Vercel API
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE="$(curl -sS -o /tmp/vercel-user.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            https://api.vercel.com/v2/user || true)"
+          if [ "${CODE}" != "200" ]; then
+            echo "::error::VERCEL_TOKEN is rejected by Vercel (HTTP ${CODE}). Do not re-run platform configure-github without --force-token after rotating. Create a long-lived token at https://vercel.com/account/tokens and: gh secret set VERCEL_TOKEN --repo ${GITHUB_REPOSITORY}"
+            exit 1
+          fi
+          # Never print token; username only if jq available, else skip.
+          if command -v jq >/dev/null 2>&1; then
+            echo "VERCEL_TOKEN ok (user=$(jq -r '.user.username // .username // "unknown"' /tmp/vercel-user.json))"
+          else
+            echo "VERCEL_TOKEN ok (HTTP 200)"
+          fi
+          rm -f /tmp/vercel-user.json
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -88,7 +117,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          if ! vercel pull --yes --environment=production --token="$VERCEL_TOKEN"; then
+            echo "::error::vercel pull failed. If the message mentions an invalid token, rotate VERCEL_TOKEN with a long-lived token and avoid configure-github overwrites (default now keeps existing secrets)."
+            exit 1
+          fi
 
       - name: Prepare install policy for local vercel build
         shell: bash
