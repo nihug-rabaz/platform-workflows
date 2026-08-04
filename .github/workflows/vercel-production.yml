@@ -113,7 +113,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DEPLOYMENT_URL="$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")"
+          # Deployment Checks can hold this CLI call on "Running Checks…".
+          # Fail clearly instead of hanging until the job timeout.
+          set +e
+          DEPLOYMENT_URL="$(timeout 720 vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")"
+          DEPLOY_EXIT=$?
+          set -e
+          if [ "${DEPLOY_EXIT}" -eq 124 ]; then
+            echo "::error::vercel deploy timed out after 12m while Running Checks. Ensure a workflow listens for repository_dispatch type vercel.deployment.ready and reports the required Deployment Check, or Force Promote in the Vercel dashboard."
+            exit 1
+          fi
+          if [ "${DEPLOY_EXIT}" -ne 0 ]; then
+            exit "${DEPLOY_EXIT}"
+          fi
           echo "deployment_url=${DEPLOYMENT_URL}" >> "$GITHUB_OUTPUT"
           {
             echo "### Production deployment"
