@@ -90,12 +90,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # corepack ships with Node; enable pnpm/yarn for monorepos that need them
           if command -v corepack >/dev/null 2>&1; then
-            corepack enable
+            corepack enable || true
           fi
-          # Ensure pnpm and yarn are available even if corepack is restricted
-          npm install --global pnpm@9 yarn@1.22.22
+          if ! command -v pnpm >/dev/null 2>&1; then
+            npm install --global pnpm@9
+          fi
+          if ! command -v yarn >/dev/null 2>&1; then
+            npm install --global yarn@1.22.22 --force
+          fi
+          pnpm --version || true
+          yarn --version || true
 
       - name: Install Vercel CLI
         shell: bash
