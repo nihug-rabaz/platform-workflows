@@ -1,0 +1,122 @@
+name: Vercel Production Deployment
+
+on:
+  workflow_call:
+    inputs:
+      project-name:
+        description: Vercel project display name
+        required: true
+        type: string
+      vercel-project-id:
+        description: Vercel project id (prj_...)
+        required: true
+        type: string
+      vercel-org-id:
+        description: Vercel team or user id
+        required: true
+        type: string
+      working-directory:
+        description: Project root directory inside the repository
+        required: false
+        type: string
+        default: "."
+      node-version:
+        description: Node.js version for the runner
+        required: false
+        type: string
+        default: "22"
+      deploy-ref:
+        description: Git ref (branch, tag, or SHA) to checkout and deploy
+        required: false
+        type: string
+        default: ""
+    secrets:
+      VERCEL_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.project-name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: vercel-production-${{ github.repository }}-${{ inputs.vercel-project-id }}
+      cancel-in-progress: true
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ inputs.vercel-org-id }}
+      VERCEL_PROJECT_ID: ${{ inputs.vercel-project-id }}
+    steps:
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${VERCEL_ORG_ID}"
+          test -n "${VERCEL_PROJECT_ID}"
+          test -n "${VERCEL_TOKEN}"
+          test -n "${{ inputs.project-name }}"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.deploy-ref != '' && inputs.deploy-ref || github.sha }}
+          fetch-depth: 1
+
+      - name: Resolve working directory
+        id: workdir
+        shell: bash
+        run: |
+          set -euo pipefail
+          WD="${{ inputs.working-directory }}"
+          if [ -z "$WD" ] || [ "$WD" = "." ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ ! -d "$WD" ]; then
+            echo "::error::Working directory '$WD' does not exist in the checked out ref"
+            exit 1
+          fi
+          echo "dir=$WD" >> "$GITHUB_OUTPUT"
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install Vercel CLI
+        shell: bash
+        run: npm install --global vercel@48.1.6
+
+      - name: Pull Vercel production configuration
+        working-directory: ${{ steps.workdir.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build production application
+        working-directory: ${{ steps.workdir.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy production application
+        id: deploy
+        working-directory: ${{ steps.workdir.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEPLOYMENT_URL="$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")"
+          echo "deployment_url=${DEPLOYMENT_URL}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Production deployment"
+            echo "- Repository: \`${GITHUB_REPOSITORY}\`"
+            echo "- Project: \`${{ inputs.project-name }}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Working directory: \`${{ steps.workdir.outputs.dir }}\`"
+            echo "- URL: ${DEPLOYMENT_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"

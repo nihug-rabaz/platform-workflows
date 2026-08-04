@@ -1,0 +1,18 @@
+{
+  "name": "platform-workflows",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Centralized GitHub Actions reusable workflows for Vercel production deployments",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "discover": "node scripts/discover.mjs",
+    "configure-github": "node scripts/configure-github.mjs",
+    "distribute": "node scripts/distribute-workflows.mjs",
+    "trigger": "node scripts/trigger-deployments.mjs",
+    "verify": "node scripts/verify-deployments.mjs",
+    "rollback": "node scripts/rollback-migration.mjs",
+    "report": "node scripts/generate-report.mjs",
+    "disable-git-deploy": "node scripts/disable-git-deploy.mjs"
+  }
+}
