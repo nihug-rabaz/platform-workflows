@@ -88,7 +88,7 @@ jobs:
 
       - name: Install Vercel CLI
         shell: bash
-        run: npm install --global vercel@48.1.6
+        run: npm install --global vercel@54.21.1
 
       - name: Pull Vercel production configuration
         working-directory: ${{ steps.workdir.outputs.dir }}

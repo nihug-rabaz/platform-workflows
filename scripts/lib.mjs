@@ -74,7 +74,7 @@ export async function vercelApi(path, { method = "GET", body, teamId } = {}) {
   }
   if (!res.ok) {
     const msg = data?.error?.message || data?.message || text || res.statusText;
-    const err = new Error(`Vercel API ${method} ${path} → ${res.status}: ${msg}`);
+    const err = new Error(`Vercel API ${method} ${path} ג†’ ${res.status}: ${msg}`);
     err.status = res.status;
     err.data = data;
     throw err;
@@ -149,4 +149,4 @@ export const ORG = process.env.GITHUB_ORG || "nihug-rabaz";
 export const PLATFORM_REPO = `${ORG}/platform-workflows`;
 export const REUSABLE_WORKFLOW = `${PLATFORM_REPO}/.github/workflows/vercel-production.yml@v1`;
 export const CALLER_WORKFLOW_PATH = ".github/workflows/deploy-production.yml";
-export const VERCEL_CLI_VERSION = "48.1.6";
+export const VERCEL_CLI_VERSION = "54.21.1";
