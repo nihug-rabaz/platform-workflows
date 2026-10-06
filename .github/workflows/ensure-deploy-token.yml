@@ -1,0 +1,52 @@
+name: Ensure repo VERCEL_TOKEN
+
+# Private repos on the free org plan do not receive org secrets, so each
+# private repo needs its own VERCEL_TOKEN repo secret. Copies the org token
+# into the target repo without exposing it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "Target repository (nihug-rabaz/NAME)"
+        required: true
+        type: string
+      force:
+        description: "Overwrite an existing repo secret"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout platform-workflows
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Ensure repo secret
+        env:
+          GH_TOKEN: ${{ secrets.GH_ONBOARDING_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          TARGET_REPO: ${{ inputs.repo }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TARGET_REPO" =~ ^nihug-rabaz/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::repo must be nihug-rabaz/NAME"
+            exit 1
+          fi
+          ARGS=(--repo "$TARGET_REPO")
+          if [ "$FORCE" = "true" ]; then
+            ARGS+=(--force)
+          fi
+          node scripts/ensure-deploy-token.mjs "${ARGS[@]}"
